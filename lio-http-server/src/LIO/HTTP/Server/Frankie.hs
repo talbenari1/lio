@@ -129,7 +129,7 @@ pathVarOrFail :: (WebMonad m, Parseable a)
               => PathSegment -- ^ Parameter name
               -> Controller s m a
 pathVarOrFail ps = do
-  pathInfo <- liftM reqPathInfo request
+  pathInfo <- fmap reqPathInfo request
   case ps of
     (Var _ idx) | idx < length pathInfo ->
       case parseText (pathInfo!!idx) of
@@ -148,7 +148,7 @@ class (Monad m, Typeable h) => RequestHandler h s m | h -> s m where
   reqHandlerArgTy :: h -> FrankieConfig s m [TypeRep]
   reqHandlerArgTy f = return . getArgs' .  typeRepArgs $ typeOf f
     where getArgs' :: [TypeRep] -> [TypeRep]
-          getArgs' [a, b] = a : (getArgs' $ typeRepArgs b)
+          getArgs' [a, b] = a : getArgs' (typeRepArgs b)
           getArgs' _      = []
 
 instance (Typeable s, WebMonad m, Typeable m)
@@ -197,9 +197,9 @@ fixSegments :: [PathSegment]
             -> [TypeRep]
             -> [PathSegment]
 fixSegments (Var n0 i0 : ss) (ty : ts) =
-  let n0' = n0 `Text.append` (Text.pack $ '@' : show ty)
-  in (Var n0' i0) : fixSegments ss ts
-fixSegments ((Dir d) : ss) ts = (Dir d) : fixSegments ss ts
+  let n0' = n0 `Text.append` Text.pack ('@' : show ty)
+  in Var n0' i0 : fixSegments ss ts
+fixSegments (Dir d : ss) ts = Dir d : fixSegments ss ts
 fixSegments [] [] = []
 fixSegments _ _ = error "BUG: fixSegments called incorrectly"
 
@@ -227,7 +227,7 @@ instance Show PathSegment where
   show (Var s _) = Text.unpack s -- ++ "@" ++ show i
 
 instance {-# INCOHERENT #-} Show [PathSegment] where
-  show ps = "/" ++ (intercalate "/" $ map show ps) ++ "/"
+  show ps = "/" ++ intercalate "/" (map show ps) ++ "/"
 
 instance Eq PathSegment where
   (Dir x) == (Dir y) = x == y
@@ -374,7 +374,7 @@ runFrankieServer :: WebMonad m
                  -> IO ()
 runFrankieServer mode0 frankieAct = do
   cfg <- runFrankieConfig frankieAct
-  case (Map.lookup mode0 $ cfgModes cfg) of
+  case Map.lookup mode0 $ cfgModes cfg of
     Nothing -> throwIO $ InvalidConfig "invalid mode "
     Just modeCfg -> do
       when (isNothing $ cfgPort modeCfg) $ throwIO $ InvalidConfig "missing port"
@@ -400,12 +400,12 @@ mainFrankieController cfg = do
             Map.filterWithKey (\(m, ps) _ -> m == method && matchPath ps pathInfo) $
             cfgDispatchMap cfg
   -- create controller action to execute
-  controller <- return $ case cs of
-    [(_, controller)] -> controller
-    -- didn't match anything in the dispatch table, fallback?
-    _ | (isJust $ cfgDispatchFallback cfg) -> fromJust $ cfgDispatchFallback cfg
-    -- nope, just respond with 404
-    _ -> respond notFound
+  let controller = case cs of
+                     [(_, ctrl)] -> ctrl
+                     -- didn't match anything in the dispatch table, fallback?
+                     _ | isJust $ cfgDispatchFallback cfg -> fromJust $ cfgDispatchFallback cfg
+                     -- nope, just respond with 404
+                     _ -> respond notFound
   -- execute the controller action
   er <- tryController controller
   case er of
@@ -457,7 +457,7 @@ instance Show s  => Show (ServerConfig s m) where
     ++ "}"
 
 -- | Configuration errors
-data InvalidConfigException = InvalidConfig String
+newtype InvalidConfigException = InvalidConfig String
   deriving (Show, Typeable)
 instance Exception InvalidConfigException
 
