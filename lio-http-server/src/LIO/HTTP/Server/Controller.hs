@@ -86,8 +86,8 @@ instance Functor ControllerStatus where
 --
 -- Within the Controller monad, the remainder of the computation can be
 -- short-circuited by 'respond'ing with a 'Response'.
-data Controller s m a = Controller {
- runController :: s -> Logger m -> Request m -> m (ControllerStatus a, s)
+newtype Controller s m a = Controller {
+  runController :: s -> Logger m -> Request m -> m (ControllerStatus a, s)
 } deriving (Typeable)
 
 instance Functor m => Functor (Controller s m) where
@@ -100,7 +100,7 @@ instance (Monad m, Functor m) => Applicative (Controller s m) where
   (<*>) = ap
 
 instance Monad m => Monad (Controller s m) where
-  return a = Controller $ \st _ _ -> return $ (Working a, st)
+  return a = Controller $ \st _ _ -> return (Working a, st)
   (Controller act0) >>= fn = Controller $ \st0 logger req -> do
     (cs, st1) <- act0 st0 logger req
     case cs of
@@ -193,7 +193,7 @@ queryParams :: (WebMonad m, Parseable a)
             => Strict.ByteString -- ^ Parameter name
             -> Controller s m [a]
 queryParams varName = do
-  query <- liftM reqQueryString request
+  query <- fmap reqQueryString request
   return $ mapMaybe go query
     where go (name, mparam) = if name == varName
                                 then mparam >>= parseBS
@@ -231,7 +231,7 @@ instance {-# OVERLAPPABLE #-} (Read a, Typeable a) => Parseable a where
 -- present in the HTTP request.
 requestHeader :: WebMonad m
               => HeaderName -> Controller s m (Maybe Strict.ByteString)
-requestHeader name = request >>= return . lookup name . reqHeaders
+requestHeader name = fmap (lookup name . reqHeaders) request
 
 -- | Redirect back to the referer. If the referer header is not present
 -- 'redirectTo' root (i.e., @\/@).
