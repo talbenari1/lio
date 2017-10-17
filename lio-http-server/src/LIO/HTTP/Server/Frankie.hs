@@ -1,12 +1,12 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE UndecidableInstances       #-}
 module LIO.HTTP.Server.Frankie (
   -- * Top-level interface
   FrankieConfig(..), FrankieConfigDispatch(..),
@@ -38,24 +38,24 @@ module LIO.HTTP.Server.Frankie (
   module LIO.HTTP.Server.Responses,
   module LIO.HTTP.Server.Controller
 ) where
-import Prelude hiding (head)
-import LIO.HTTP.Server
-import LIO.HTTP.Server.Responses
-import LIO.HTTP.Server.Controller
+import           LIO.HTTP.Server
+import           LIO.HTTP.Server.Controller
+import           LIO.HTTP.Server.Responses
+import           Prelude                    hiding (head)
 
-import Control.Exception
-import Control.Monad.State hiding (get, put)
-import Control.Monad.Reader
-import qualified Control.Monad.State as State
+import           Control.Exception
+import           Control.Monad.Reader
+import           Control.Monad.State        hiding (get, put)
+import qualified Control.Monad.State        as State
 
-import Data.Dynamic
-import Data.Maybe
-import Data.Map (Map)
-import Data.List (intercalate)
-import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Map as Map
+import           Data.Dynamic
+import           Data.List                  (intercalate)
+import           Data.Map                   (Map)
+import qualified Data.Map                   as Map
+import           Data.Maybe
+import           Data.Text                  (Text)
+import qualified Data.Text                  as Text
+import qualified Data.Text.Encoding         as Text
 
 --
 -- Configure dispatch table
@@ -134,7 +134,7 @@ pathVarOrFail ps = do
     (Var _ idx) | idx < length pathInfo ->
       case parseText (pathInfo!!idx) of
         Just x -> return x
-        _ -> parseFailed
+        _      -> parseFailed
     _ -> parseFailed
 
 
@@ -154,7 +154,7 @@ class (Monad m, Typeable h) => RequestHandler h s m | h -> s m where
 instance (Typeable s, WebMonad m, Typeable m)
   => RequestHandler (Controller s m ()) s m where
   handlerToController [] ctrl = ctrl
-  handlerToController _ _ = invalidArgs
+  handlerToController _ _     = invalidArgs
 
 instance (Parseable a, Typeable a, RequestHandler c s m, WebMonad m)
   => RequestHandler (a -> c) s m where
@@ -170,7 +170,7 @@ regMethodHandler :: RequestHandler h s m
                  => Method -> Text -> h -> FrankieConfig s m ()
 regMethodHandler method path handler = do
   cfg <- State.get
-  segments <- toPathSegments path
+  let segments = toPathSegments path
   let map0 = cfgDispatchMap cfg
       key0 = (method, segments)
   -- Make sure the controller is not already registered (liquid?)
@@ -204,15 +204,15 @@ fixSegments [] [] = []
 fixSegments _ _ = error "BUG: fixSegments called incorrectly"
 
 -- | Convert a path to its corresponding segments
-toPathSegments :: Monad m => Text -> m [PathSegment]
-toPathSegments path = do
-  -- TODO: decodePathSegments assumes valid path. We should make sure that
-  -- the path is to spec <https://tools.ietf.org/html/rfc3986#section-3.3>
-  let segments = decodePathSegments (Text.encodeUtf8 path)
-  return . snd $ foldr (\seg (idx, ps) ->
-    (idx - 1, toPathSegment seg idx : ps)) (length segments - 1,[]) segments
-  where toPathSegment seg idx = if ":" `Text.isPrefixOf` seg
-                                  then Var seg idx else Dir seg
+toPathSegments :: Text -> [PathSegment]
+toPathSegments path = snd $ foldr fn (length segments - 1, []) segments where
+    -- TODO: decodePathSegments assumes valid path. We should make sure that
+    -- the path is to spec <https://tools.ietf.org/html/rfc3986#section-3.3>
+    segments = decodePathSegments $ Text.encodeUtf8 path
+    fn seg (idx, ps) = (idx - 1, toPathSegment seg idx : ps)
+                          -- Required variable
+    toPathSegment seg idx | ":" `Text.isPrefixOf`  seg = Var seg idx
+                          | otherwise                  = Dir seg
 
 -- | A path segment is a simple directory or a variable. Variables are always
 -- prefixed by @:@ and considered the same (equal).
@@ -235,9 +235,9 @@ instance Eq PathSegment where
   _ == _ = False
 
 instance Ord PathSegment where
-  compare (Dir x) (Dir y) = compare x y
-  compare (Dir _) (Var _ _) = LT
-  compare (Var _ _) (Dir _) = GT
+  compare (Dir x) (Dir y)     = compare x y
+  compare (Dir _) (Var _ _)   = LT
+  compare (Var _ _) (Dir _)   = GT
   compare (Var _ _) (Var _ _) = EQ
 
 --
@@ -272,10 +272,10 @@ logger :: Monad m => LogLevel -> Logger m -> FrankieConfigMode s m ()
 logger level (Logger lgr0) = do
   cfg <- getModeConfig
   -- create logger that only logs things as sever as level
-  let lgr1 l s = when (l <= level) $ lgr0 l s 
+  let lgr1 l s = when (l <= level) $ lgr0 l s
       newLogger = case cfgLogger cfg of
                     Just (Logger lgrC) -> \l s -> lgrC l s >> lgr1 l s
-                    Nothing -> lgr1
+                    Nothing            -> lgr1
   setModeConfig $ cfg { cfgLogger = Just (Logger newLogger)}
 
 
@@ -310,11 +310,6 @@ newModeConfig = do
   case Map.lookup mode0 modeMap of
     Just _       -> cfgFail "mode already defined"
     _            -> State.put $ cfg { cfgModes = Map.insert mode0 nullModeCfg modeMap }
-
-
---
---
---
 
 -- | Type used to encode a Frankie server configuration
 newtype FrankieConfig s m a = FrankieConfig {
@@ -439,13 +434,13 @@ matchPath _            _      = False
 -- It also contains the dispatch table.
 -- TODO: add support for error handlers, loggers, dev vs. prod, etc.
 data ServerConfig s m = ServerConfig {
-  cfgModes       :: Map Mode (ModeConfig s m),
+  cfgModes            :: Map Mode (ModeConfig s m),
   -- ^ Configuration modes
-  cfgDispatchMap :: Map (Method, [PathSegment]) (Controller s m ()),
+  cfgDispatchMap      :: Map (Method, [PathSegment]) (Controller s m ()),
   -- ^ Dispatch table
   cfgDispatchFallback :: Maybe (Controller s m ()),
   -- ^ Dispatch fallback handler
-  cfgOnErrorHandler  :: Maybe (SomeException -> Controller s m ())
+  cfgOnErrorHandler   :: Maybe (SomeException -> Controller s m ())
   -- ^ Exception handler
 }
 
@@ -479,10 +474,10 @@ type Mode = String
 
 -- | Mode configuration. For example, production or development.
 data ModeConfig s m = ModeConfig {
-  cfgPort        :: Maybe Port,
-  cfgHostPref    :: Maybe HostPreference,
-  cfgAppState    :: Maybe s,
-  cfgLogger      :: Maybe (Logger m)
+  cfgPort     :: Maybe Port,
+  cfgHostPref :: Maybe HostPreference,
+  cfgAppState :: Maybe s,
+  cfgLogger   :: Maybe (Logger m)
   }
 
 instance Show (ModeConfig s m) where

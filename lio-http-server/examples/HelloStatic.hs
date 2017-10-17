@@ -13,7 +13,7 @@ main = runFrankieServer "dev" $ do
     appState ()
     logger DEBUG colorStdOutLogger
   dispatch $ do
-    -- TODO: Add /* support
+    -- TODO: Convert to "/+" once supported
     get "/:file" $ static "examples/public"
     fallback $ respond notFound
   onError $ \err -> do
