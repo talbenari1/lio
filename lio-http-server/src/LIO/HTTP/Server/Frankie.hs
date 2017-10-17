@@ -259,7 +259,7 @@ host pref = do
   when (isJust $ cfgHostPref cfg) $ cfgFail "host already set"
   setModeConfig $ cfg { cfgHostPref = Just pref }
 
--- | Set the app host preference.
+-- | Set the app's initial state.
 appState :: s -> FrankieConfigMode s m ()
 appState s = do
   cfg <- getModeConfig
