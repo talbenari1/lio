@@ -5,6 +5,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
 {-# LANGUAGE UndecidableInstances       #-}
 module LIO.HTTP.Server.Frankie (
@@ -12,7 +13,7 @@ module LIO.HTTP.Server.Frankie (
   FrankieConfig(..), FrankieConfigDispatch(..),
   runFrankieServer,
   -- ** Configuration modes
-  mode, port, host, appState, logger,
+  mode, port, host, appState, logger, static,
   -- ** Dispatch-table
   dispatch,
   get, post, put, patch, delete,
@@ -41,6 +42,7 @@ module LIO.HTTP.Server.Frankie (
 import           LIO.HTTP.Server
 import           LIO.HTTP.Server.Controller
 import           LIO.HTTP.Server.Responses
+import           LIO.TCB                    (ioTCB)
 import           Prelude                    hiding (head)
 
 import           Control.Exception
@@ -48,14 +50,19 @@ import           Control.Monad.Reader
 import           Control.Monad.State        hiding (get, put)
 import qualified Control.Monad.State        as State
 
+import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Dynamic
-import           Data.List                  (intercalate)
+import           Data.List                  (find, intercalate, isPrefixOf,
+                                             stripPrefix)
 import           Data.Map                   (Map)
 import qualified Data.Map                   as Map
 import           Data.Maybe
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Encoding         as Text
+
+import           System.Directory           (makeAbsolute)
+import           System.FilePath            ((</>))
 
 --
 -- Configure dispatch table
@@ -278,6 +285,12 @@ logger level (Logger lgr0) = do
                     Nothing            -> lgr1
   setModeConfig $ cfg { cfgLogger = Just (Logger newLogger)}
 
+static :: Monad m => FilePath -> FilePath -> FrankieConfigMode s m ()
+static vprefix path = do
+  cfg <- getModeConfig
+  case cfgStaticDir cfg of
+    Just _  -> cfgFail "static path already set"
+    Nothing -> setModeConfig $ cfg { cfgStaticDir = Just (vprefix, path) }
 
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
@@ -297,8 +310,7 @@ setModeConfig :: ModeConfig s m -> FrankieConfigMode s m ()
 setModeConfig modeCfg = do
   mode0 <- ask
   cfg <- State.get
-  let modeMap = cfgModes cfg
-  State.put $ cfg { cfgModes = Map.insert mode0 modeCfg modeMap }
+  State.put $ cfg { cfgModes = Map.insert mode0 modeCfg $ cfgModes cfg }
 
 -- | Helper function for creating a new config mode.
 newModeConfig :: FrankieConfigMode s m ()
@@ -383,26 +395,27 @@ runFrankieServer mode0 frankieAct = do
                   Just l -> l
                   _      -> Logger $ \_ _ -> return ()
 
-      server cPort cHost (toApp (mainFrankieController cfg) cState lgr)
+      server cPort cHost (toApp (mainFrankieController cfg modeCfg) cState lgr)
 
 -- | The main controller that dispatches requests to corresponding controllers.
-mainFrankieController :: WebMonad m => ServerConfig s m -> Controller s m ()
-mainFrankieController cfg = do
+mainFrankieController :: WebMonad m => ServerConfig s m -> ModeConfig s m -> Controller s m ()
+mainFrankieController cfg modeCfg = do
   req <- request
   let method   = reqMethod req
       pathInfo = reqPathInfo req
   let cs = Map.toList $
             Map.filterWithKey (\(m, ps) _ -> m == method && matchPath ps pathInfo) $
             cfgDispatchMap cfg
-  -- create controller action to execute
-  let controller = case cs of
-                     [(_, ctrl)] -> ctrl
-                     -- didn't match anything in the dispatch table, fallback?
-                     _ | isJust $ cfgDispatchFallback cfg -> fromJust $ cfgDispatchFallback cfg
-                     -- nope, just respond with 404
-                     _ -> respond notFound
-  -- execute the controller action
-  er <- tryController controller
+  -- create and execute the controller action
+  er <- tryController $ case cs of
+    [(_, ctrl)] -> ctrl
+    _ -> do
+      file <- case cfgStaticDir modeCfg of
+        Just dir -> undefined -- staticLookup dir pathInfo
+        Nothing  -> return Nothing
+      if isJust file
+        then respond $ okHtml $ fromJust file
+        else fromMaybe (respond notFound) $ cfgDispatchFallback cfg
   case er of
     Right r  -> return r
     -- controller raised exception
@@ -418,7 +431,7 @@ mainFrankieController cfg = do
             -- handler throw exception
             _       -> respond $ serverError "Something went wrong"
         -- no user-defined handler
-        _            -> respond $ serverError "Something went wrong"
+        _ -> respond $ serverError "Something went wrong"
 
 -- | Match a path segment with the path request info. We only need
 -- to make sure that the number of directories are the same and
@@ -429,6 +442,16 @@ matchPath (Var _ _:ps) (_:ts) = matchPath ps ts
 matchPath []           []     = True
 matchPath _            _      = False
 
+staticLookup :: (FilePath, FilePath) -> [Text] -> IO (Maybe L8.ByteString)
+staticLookup (vprefix, path) parts = if vprefix `isPrefixOf` route
+  then do
+    let fullPath = path </> fromJust (stripPrefix vprefix route)
+    fileOrEx :: Either SomeException L8.ByteString <- try $ L8.readFile fullPath
+    case fileOrEx of
+      Left ex    -> return Nothing
+      Right file -> return $ Just file
+  else return Nothing
+  where route = show parts
 
 -- | A server configuration containts the port and host to run the server on.
 -- It also contains the dispatch table.
@@ -474,11 +497,12 @@ type Mode = String
 
 -- | Mode configuration. For example, production or development.
 data ModeConfig s m = ModeConfig {
-  cfgPort     :: Maybe Port,
-  cfgHostPref :: Maybe HostPreference,
-  cfgAppState :: Maybe s,
-  cfgLogger   :: Maybe (Logger m)
-  }
+  cfgPort      :: Maybe Port,
+  cfgHostPref  :: Maybe HostPreference,
+  cfgAppState  :: Maybe s,
+  cfgLogger    :: Maybe (Logger m),
+  cfgStaticDir :: Maybe (FilePath, FilePath)
+}
 
 instance Show (ModeConfig s m) where
   show cfg = (show . cfgHostPref $ cfg) ++ ":" ++
@@ -491,5 +515,6 @@ nullModeCfg =  ModeConfig {
   cfgPort        = Nothing,
   cfgHostPref    = Nothing,
   cfgAppState    = Nothing,
-  cfgLogger      = Nothing
+  cfgLogger      = Nothing,
+  cfgStaticDir   = Nothing
 }

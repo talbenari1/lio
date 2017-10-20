@@ -85,7 +85,7 @@ levelToColor DEBUG     = Magenta
 
 -- | Create a new logger that writes to the given path. Note that there
 -- is no clean way to clean up the file descriptor once the file is open.
--- In general is is okay because we expect the logger to remain live for
+-- In general it is okay because we expect the logger to remain live for
 -- the lifetime of the application.
 openFileLogger :: FrankieConfigMonad k => FilePath -> k s DC (Logger DC)
 openFileLogger path = liftFrankie $ FrankieConfig $ lift $ do
