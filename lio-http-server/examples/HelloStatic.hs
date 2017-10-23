@@ -11,7 +11,7 @@ main = runFrankieServer "dev" $ do
     host "127.0.0.1"
     port 3000
     appState ()
-    static "/assets" "examples/public"
+    static fileHandler "/assets" "examples/public"
     logger DEBUG colorStdOutLogger
   dispatch $ fallback $ respond notFound
   onError $ \err -> do

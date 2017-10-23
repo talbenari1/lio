@@ -20,7 +20,8 @@ library
                        LIO.HTTP.Server.Responses,
                        LIO.HTTP.Server.Controller,
                        LIO.HTTP.Server.Frankie,
-                       LIO.HTTP.Server.Frankie.Loggers
+                       LIO.HTTP.Server.Frankie.Loggers,
+                       LIO.HTTP.Server.Frankie.Static
   build-depends:       ansi-terminal >= 0.6.2.1,
                        base          >= 4.7 && < 6,
                        bytestring    >= 0.10,

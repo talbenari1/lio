@@ -42,27 +42,21 @@ module LIO.HTTP.Server.Frankie (
 import           LIO.HTTP.Server
 import           LIO.HTTP.Server.Controller
 import           LIO.HTTP.Server.Responses
-import           LIO.TCB                    (ioTCB)
-import           Prelude                    hiding (head)
+import           Prelude                    hiding (head, log)
 
 import           Control.Exception
 import           Control.Monad.Reader
 import           Control.Monad.State        hiding (get, put)
 import qualified Control.Monad.State        as State
 
-import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Dynamic
-import           Data.List                  (find, intercalate, isPrefixOf,
-                                             stripPrefix)
+import           Data.List                  (intercalate)
 import           Data.Map                   (Map)
 import qualified Data.Map                   as Map
 import           Data.Maybe
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Encoding         as Text
-
-import           System.Directory           (makeAbsolute)
-import           System.FilePath            ((</>))
 
 --
 -- Configure dispatch table
@@ -278,19 +272,23 @@ appState s = do
 logger :: Monad m => LogLevel -> Logger m -> FrankieConfigMode s m ()
 logger level (Logger lgr0) = do
   cfg <- getModeConfig
-  -- create logger that only logs things as sever as level
+  -- create logger that only logs things as severe as level
   let lgr1 l s = when (l <= level) $ lgr0 l s
       newLogger = case cfgLogger cfg of
                     Just (Logger lgrC) -> \l s -> lgrC l s >> lgr1 l s
                     Nothing            -> lgr1
   setModeConfig $ cfg { cfgLogger = Just (Logger newLogger)}
 
-static :: Monad m => FilePath -> FilePath -> FrankieConfigMode s m ()
-static vprefix path = do
+-- TODO: can we make sure that @path@ exists before setting the dir?
+static :: Monad m => StaticHandler m -> Text -> Text -> FrankieConfigMode s m ()
+static handler vprefix path = do
   cfg <- getModeConfig
   case cfgStaticDir cfg of
     Just _  -> cfgFail "static path already set"
-    Nothing -> setModeConfig $ cfg { cfgStaticDir = Just (vprefix, path) }
+    Nothing -> setModeConfig $ cfg { cfgStaticDir = Just (handler, prep vprefix, path) } where
+      prep text = Text.split (== '/') (pref . suff $ text)
+      pref text = fromMaybe text $ Text.stripPrefix "/" text
+      suff text = fromMaybe text $ Text.stripSuffix "/" text
 
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
@@ -394,8 +392,11 @@ runFrankieServer mode0 frankieAct = do
           lgr = case cfgLogger modeCfg of
                   Just l -> l
                   _      -> Logger $ \_ _ -> return ()
+          (hdlr, _, _) = case cfgStaticDir modeCfg of
+                   Just h -> h
+                   _      -> (StaticHandler $ \_ _ -> return Nothing, [""], "")
 
-      server cPort cHost (toApp (mainFrankieController cfg modeCfg) cState lgr)
+      server cPort cHost (toApp (mainFrankieController cfg modeCfg) cState lgr hdlr)
 
 -- | The main controller that dispatches requests to corresponding controllers.
 mainFrankieController :: WebMonad m => ServerConfig s m -> ModeConfig s m -> Controller s m ()
@@ -411,8 +412,8 @@ mainFrankieController cfg modeCfg = do
     [(_, ctrl)] -> ctrl
     _ -> do
       file <- case cfgStaticDir modeCfg of
-        Just dir -> undefined -- staticLookup dir pathInfo
-        Nothing  -> return Nothing
+        Just (StaticHandler handler, vprefix, path) -> lift $ handler (vprefix, path) pathInfo
+        Nothing -> return Nothing
       if isJust file
         then respond $ okHtml $ fromJust file
         else fromMaybe (respond notFound) $ cfgDispatchFallback cfg
@@ -441,17 +442,6 @@ matchPath (Dir p:ps)   (t:ts) = p == t && matchPath ps ts
 matchPath (Var _ _:ps) (_:ts) = matchPath ps ts
 matchPath []           []     = True
 matchPath _            _      = False
-
-staticLookup :: (FilePath, FilePath) -> [Text] -> IO (Maybe L8.ByteString)
-staticLookup (vprefix, path) parts = if vprefix `isPrefixOf` route
-  then do
-    let fullPath = path </> fromJust (stripPrefix vprefix route)
-    fileOrEx :: Either SomeException L8.ByteString <- try $ L8.readFile fullPath
-    case fileOrEx of
-      Left ex    -> return Nothing
-      Right file -> return $ Just file
-  else return Nothing
-  where route = show parts
 
 -- | A server configuration containts the port and host to run the server on.
 -- It also contains the dispatch table.
@@ -501,13 +491,12 @@ data ModeConfig s m = ModeConfig {
   cfgHostPref  :: Maybe HostPreference,
   cfgAppState  :: Maybe s,
   cfgLogger    :: Maybe (Logger m),
-  cfgStaticDir :: Maybe (FilePath, FilePath)
+  cfgStaticDir :: Maybe (StaticHandler m, [Text], Text)
 }
 
 instance Show (ModeConfig s m) where
   show cfg = (show . cfgHostPref $ cfg) ++ ":" ++
              (show . cfgHostPref $ cfg)
-
 
 -- | Empty mode configuration.
 nullModeCfg :: ModeConfig s m
