@@ -26,7 +26,7 @@ main = runFrankieServer "prod" $ do
     fallback $ do
       req <- request
       log WARNING $ "Not sure how to handle: " ++ show req
-      respond $ notFound
+      respond notFound
   --
   onError $ \err -> do
     log ERROR $ "Controller failed with " ++ displayException err
@@ -59,5 +59,5 @@ showUserPost uid pid = do
 
 doFail :: DCController ()
 doFail = do
-  log DEBUG $ "about to throw an exception"
+  log DEBUG "about to throw an exception"
   fail "w00t"

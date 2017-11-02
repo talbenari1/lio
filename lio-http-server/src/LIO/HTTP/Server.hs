@@ -1,8 +1,8 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 {-|
 This module exposes a general interface for writing web apps. It's
 slightly simpler than Wai, but also more general in allowing code to run in
@@ -33,31 +33,31 @@ module LIO.HTTP.Server (
   -- * Handle requests in the WebMonad
   WebMonad(..), Request(..), Response(..),
   Application, Middleware,
-  -- * General networking types 
+  -- * General networking types
   Port, HostPreference,
   module Network.HTTP.Types,
   -- * DC Label specific
   DCRequest, DCApplication, DCMiddleware
   ) where
-import Network.HTTP.Types
-import Data.Text (Text)
-import qualified Data.Text as Text
-import LIO.DCLabel
-import LIO.TCB (ioTCB)
-import LIO.Exception
-import Network.Wai.Handler.Warp (Port, HostPreference)
-import qualified Network.Wai as Wai
+import qualified Data.ByteString.Lazy     as Lazy
+import           Data.Text                (Text)
+import qualified Data.Text                as Text
+import           LIO.DCLabel
+import           LIO.Exception
+import           LIO.TCB                  (ioTCB)
+import           Network.HTTP.Types
+import qualified Network.Wai              as Wai
+import           Network.Wai.Handler.Warp (HostPreference, Port)
 import qualified Network.Wai.Handler.Warp as Wai
-import qualified Data.ByteString.Lazy as Lazy
 
 
 -- | This type class is used to describe a general, simple Wai-like interface
 -- for manipulating HTTP requests and running a web app server.
 class Monad m => WebMonad m where
   -- | Data type representing the request.
-  data Request m :: * 
+  data Request m :: *
   -- | HTTP request method.
-  reqMethod      :: Request m -> Method            
+  reqMethod      :: Request m -> Method
   -- | HTTP version.
   reqHttpVersion :: Request m -> HttpVersion
   -- | Path info, i.e., the URL pieces after the scheme, host, port, not
@@ -88,7 +88,7 @@ instance WebMonad m => Show (Request m) where
         pathInfo    = show $ reqPathInfo req
         queryString = show $ reqQueryString req
         headers     = show $ reqHeaders req
-        
+
 -- | This data type encapsulates HTTP responses. For now, we only support lazy
 -- ByteString bodies. In the future this data type may be extended to
 -- efficiently support streams and file serving.
@@ -123,9 +123,9 @@ instance WebMonad DC where
   tryWeb act     = do er <- try act
                       case er of
                         Left e -> return . Left . toException $ e
-                        r -> return r
-  server port hostPref app = 
-    let settings = Wai.setHost hostPref $ Wai.setPort port $ 
+                        r      -> return r
+  server port hostPref app =
+    let settings = Wai.setHost hostPref $ Wai.setPort port $
                    Wai.setServerName "lio-http-server" $ Wai.defaultSettings
     in Wai.runSettings settings $ toWaiApplication app
 
@@ -137,7 +137,7 @@ type DCApplication = Application DC
 
 -- | Type alias for DC-labeled middleware
 type DCMiddleware = Middleware DC
- 
+
 -- | Internal function for converting a DCApplication to a Wai Application
 toWaiApplication :: DCApplication -> Wai.Application
 toWaiApplication dcApp wReq wRespond = do

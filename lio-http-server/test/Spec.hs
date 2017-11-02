@@ -1,16 +1,16 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-import Test.Framework (defaultMain, testGroup)
-import Test.Framework.Providers.HUnit
-import Test.HUnit
+import           Test.Framework                 (defaultMain, testGroup)
+import           Test.Framework.Providers.HUnit
+import           Test.HUnit
 
-import Control.Exception
-import Control.Monad
-import LIO.HTTP.Server.Frankie
-import qualified Data.Map as Map
+import           Control.Exception
+import           Control.Monad
+import qualified Data.Map                       as Map
+import           LIO.HTTP.Server.Frankie
 
-import Data.Text (Text)
-import Data.Dynamic
+import           Data.Dynamic
+import           Data.Text                      (Text)
 
 main = defaultMain tests
 
@@ -50,22 +50,22 @@ tests = [
 
 
 test_toPathSegments1 = do
-  segs <- toPathSegments "/a/:b/c/:d"
+  let segs = toPathSegments "/a/:b/c/:d"
   segs @?= [Dir "a", Var ":b" 1, Dir "c", Var ":d" 3]
 
 test_toPathSegments2 = do
-  seg1 <- toPathSegments "/a/:b/c/:d"
-  seg2 <- toPathSegments "/a/:boo/c/:dood"
+  let seg1 = toPathSegments "/a/:b/c/:d"
+  let seg2 = toPathSegments "/a/:boo/c/:dood"
   seg1 @?= seg2
 
 test_toPathSegments3 = do
-  seg1 <- toPathSegments "/a/:b/c/:d"
-  seg2 <- toPathSegments "/a/:b/x/:d"
+  let seg1 = toPathSegments "/a/:b/c/:d"
+  let seg2 = toPathSegments "/a/:b/x/:d"
   seg1 == seg2 @?= False
 
 test_toPathSegments4 = do
-  seg1 <- toPathSegments "/a/:b/c/:d"
-  seg2 <- toPathSegments "/a/:b/c/:d/"
+  let seg1 = toPathSegments "/a/:b/c/:d"
+  let seg2 = toPathSegments "/a/:b/c/:d/"
   seg1 == seg2 @?= True
 
 test_runFrankieConfig1 = do
@@ -111,10 +111,9 @@ test_runFrankieConfig5 = do
   cfg <- runFrankieConfig $ do
     mode "test" $ do
       host "127.0.0.1" ; port 3030 ; appState ()
-    dispatch $ do
-      get "/x/:y" nullCtrl1
+    dispatch $ get "/x/:y" nullCtrl1
   let map = cfgDispatchMap cfg
-  segs <- toPathSegments "/x/:yo"
+  let segs = toPathSegments "/x/:yo"
   Map.keys map @?= [(methodGet, segs)]
 
 test_runFrankieConfig6 = do
@@ -135,7 +134,7 @@ test_runFrankieConfig7 = do
       get "/x/:y" nullCtrl1
       put "/x/:y" nullCtrl1
   let map = cfgDispatchMap cfg
-  segs <- toPathSegments "/x/:yo"
+  let segs = toPathSegments "/x/:yo"
   Map.keys map @?= [(methodGet, segs), (methodPut, segs)]
 
 test_runFrankieConfig8 = do
@@ -146,8 +145,8 @@ test_runFrankieConfig8 = do
       get "/x/:y" nullCtrl1
       get "/y/:x" nullCtrl1
   let map = cfgDispatchMap cfg
-  segs1 <- toPathSegments "/x/:yo"
-  segs2 <- toPathSegments "/y/:yo"
+  let segs1 = toPathSegments "/x/:yo"
+  let segs2 = toPathSegments "/y/:yo"
   Map.keys map @?= [(methodGet, segs1), (methodGet, segs2)]
 
 test_runFrankieConfig9 = do
@@ -207,43 +206,32 @@ test_runFrankieConfig11 = do
   cfgHostPref cfgMode2 @?= Just "127.0.0.1"
   cfgAppState cfgMode2 @?= Just "w00t-w00t"
 
-test_mismatchRouteAndController1 = do
-  (void . runFrankieConfig $ do
-    mode "test" $ do
-      host "127.0.0.1" ; port 3030 ; appState ()
-    dispatch $ do
-      get "/x/:y" nullCtrl0)
-   `catch` (\(e :: InvalidConfigException) -> return ())
+test_mismatchRouteAndController1 = (void . runFrankieConfig $ do
+  mode "test" $ do
+    host "127.0.0.1" ; port 3030 ; appState ()
+  dispatch $ get "/x/:y" nullCtrl0)
+  `catch` (\(e :: InvalidConfigException) -> return ())
 
-test_mismatchRouteAndController2 = do
-  (void . runFrankieConfig $ do
-    mode "test " $ do
-      host "127.0.0.1" ; port 3030 ; appState ()
-    dispatch $ do
-      get "/x/:y" nullCtrl2)
-   `catch` (\(e :: InvalidConfigException) -> return ())
+test_mismatchRouteAndController2 = (void . runFrankieConfig $ do
+  mode "test " $ do
+    host "127.0.0.1" ; port 3030 ; appState ()
+  dispatch $ get "/x/:y" nullCtrl2)
+  `catch` (\(e :: InvalidConfigException) -> return ())
 
 
-test_matchPath1 = do
-  matchPath [Dir "a", Dir "b", Dir "c"] ["a", "b", "c"] @?= True
+test_matchPath1 = matchPath [Dir "a", Dir "b", Dir "c"] ["a", "b", "c"] @?= True
 
-test_matchPath2 = do
-  matchPath [Dir "a", Var ":b" 1, Dir "c"] ["a", "x", "c"] @?= True
+test_matchPath2 = matchPath [Dir "a", Var ":b" 1, Dir "c"] ["a", "x", "c"] @?= True
 
-test_matchPath3 = do
-  matchPath [Dir "a", Dir "b", Dir "c"] ["a", "x", "c"] @?= False
+test_matchPath3 = matchPath [Dir "a", Dir "b", Dir "c"] ["a", "x", "c"] @?= False
 
-test_matchPath4 = do
-  matchPath [Dir "a", Var ":b" 1, Dir "c"] ["a", ":b", "x"] @?= False
+test_matchPath4 = matchPath [Dir "a", Var ":b" 1, Dir "c"] ["a", ":b", "x"] @?= False
 
-test_matchPath5 = do
-  matchPath [] [] @?= True
+test_matchPath5 = matchPath [] [] @?= True
 
-test_matchPath6 = do
-  matchPath [Var ":x" 0] [] @?= False
+test_matchPath6 = matchPath [Var ":x" 0] [] @?= False
 
-test_matchPath7 = do
-  matchPath [] ["a"] @?= False
+test_matchPath7 = matchPath [] ["a"] @?= False
 
 nullCtrl0 :: DCController ()
 nullCtrl0 = return ()

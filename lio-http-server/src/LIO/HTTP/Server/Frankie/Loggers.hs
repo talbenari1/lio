@@ -7,21 +7,21 @@
 
 module LIO.HTTP.Server.Frankie.Loggers (
   -- * Simple, default loggers
-  stdOutLogger, stdErrLogger, 
+  stdOutLogger, stdErrLogger,
   -- * Standard out and error loggers
-  colorStdOutLogger, colorStdErrLogger, 
-  simpleStdOutLogger, simpleStdErrLogger, 
+  colorStdOutLogger, colorStdErrLogger,
+  simpleStdOutLogger, simpleStdErrLogger,
   -- * File logger
   openFileLogger
 ) where
 
-import LIO.TCB (ioTCB)
-import LIO.DCLabel
-import LIO.HTTP.Server.Frankie
-import Data.Time.LocalTime (getZonedTime)
-import System.IO
-import Control.Monad.Trans.Class (lift)
-import System.Console.ANSI
+import           Control.Monad.Trans.Class (lift)
+import           Data.Time.LocalTime       (getZonedTime)
+import           LIO.DCLabel
+import           LIO.HTTP.Server.Frankie
+import           LIO.TCB                   (ioTCB)
+import           System.Console.ANSI
+import           System.IO
 
 -- | Logger that prints to standard out, using color for TTYs.
 stdOutLogger :: Logger DC
@@ -54,7 +54,7 @@ simpleStdErrLogger = Logger $ hLog False stderr
 -- | Logger that prints string to handle
 hLog :: Bool -> Handle -> LogLevel -> String -> DC ()
 hLog useColor h level str = ioTCB $ do
-  time <- getZonedTime 
+  time <- getZonedTime
   if useColor
     then putColorStrLn level h $ show time ++ " " ++ show level ++ ": " ++ str
     else hPutStrLn h $ show time ++ " " ++ show level ++ ": " ++ str
@@ -85,7 +85,7 @@ levelToColor DEBUG     = Magenta
 
 -- | Create a new logger that writes to the given path. Note that there
 -- is no clean way to clean up the file descriptor once the file is open.
--- In general is is okay because we expect the logger to remain live for
+-- In general it is okay because we expect the logger to remain live for
 -- the lifetime of the application.
 openFileLogger :: FrankieConfigMonad k => FilePath -> k s DC (Logger DC)
 openFileLogger path = liftFrankie $ FrankieConfig $ lift $ do

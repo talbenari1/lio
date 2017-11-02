@@ -1,18 +1,19 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE UndecidableInstances       #-}
 module LIO.HTTP.Server.Frankie (
   -- * Top-level interface
   FrankieConfig(..), FrankieConfigDispatch(..),
   runFrankieServer,
   -- ** Configuration modes
-  mode, port, host, appState, logger,
+  mode, port, host, appState, logger, static,
   -- ** Dispatch-table
   dispatch,
   get, post, put, patch, delete,
@@ -38,24 +39,24 @@ module LIO.HTTP.Server.Frankie (
   module LIO.HTTP.Server.Responses,
   module LIO.HTTP.Server.Controller
 ) where
-import Prelude hiding (head)
-import LIO.HTTP.Server
-import LIO.HTTP.Server.Responses
-import LIO.HTTP.Server.Controller
+import           LIO.HTTP.Server
+import           LIO.HTTP.Server.Controller
+import           LIO.HTTP.Server.Responses
+import           Prelude                    hiding (head, log)
 
-import Control.Exception
-import Control.Monad.State hiding (get, put)
-import Control.Monad.Reader
-import qualified Control.Monad.State as State
+import           Control.Exception
+import           Control.Monad.Reader
+import           Control.Monad.State        hiding (get, put)
+import qualified Control.Monad.State        as State
 
-import Data.Dynamic
-import Data.Maybe
-import Data.Map (Map)
-import Data.List (intercalate)
-import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Map as Map
+import           Data.Dynamic
+import           Data.List                  (intercalate)
+import           Data.Map                   (Map)
+import qualified Data.Map                   as Map
+import           Data.Maybe
+import           Data.Text                  (Text)
+import qualified Data.Text                  as Text
+import qualified Data.Text.Encoding         as Text
 
 --
 -- Configure dispatch table
@@ -129,12 +130,12 @@ pathVarOrFail :: (WebMonad m, Parseable a)
               => PathSegment -- ^ Parameter name
               -> Controller s m a
 pathVarOrFail ps = do
-  pathInfo <- liftM reqPathInfo request
+  pathInfo <- fmap reqPathInfo request
   case ps of
     (Var _ idx) | idx < length pathInfo ->
       case parseText (pathInfo!!idx) of
         Just x -> return x
-        _ -> parseFailed
+        _      -> parseFailed
     _ -> parseFailed
 
 
@@ -148,13 +149,13 @@ class (Monad m, Typeable h) => RequestHandler h s m | h -> s m where
   reqHandlerArgTy :: h -> FrankieConfig s m [TypeRep]
   reqHandlerArgTy f = return . getArgs' .  typeRepArgs $ typeOf f
     where getArgs' :: [TypeRep] -> [TypeRep]
-          getArgs' [a, b] = a : (getArgs' $ typeRepArgs b)
+          getArgs' [a, b] = a : getArgs' (typeRepArgs b)
           getArgs' _      = []
 
 instance (Typeable s, WebMonad m, Typeable m)
   => RequestHandler (Controller s m ()) s m where
   handlerToController [] ctrl = ctrl
-  handlerToController _ _ = invalidArgs
+  handlerToController _ _     = invalidArgs
 
 instance (Parseable a, Typeable a, RequestHandler c s m, WebMonad m)
   => RequestHandler (a -> c) s m where
@@ -170,7 +171,7 @@ regMethodHandler :: RequestHandler h s m
                  => Method -> Text -> h -> FrankieConfig s m ()
 regMethodHandler method path handler = do
   cfg <- State.get
-  segments <- toPathSegments path
+  let segments = toPathSegments path
   let map0 = cfgDispatchMap cfg
       key0 = (method, segments)
   -- Make sure the controller is not already registered (liquid?)
@@ -197,22 +198,22 @@ fixSegments :: [PathSegment]
             -> [TypeRep]
             -> [PathSegment]
 fixSegments (Var n0 i0 : ss) (ty : ts) =
-  let n0' = n0 `Text.append` (Text.pack $ '@' : show ty)
-  in (Var n0' i0) : fixSegments ss ts
-fixSegments ((Dir d) : ss) ts = (Dir d) : fixSegments ss ts
+  let n0' = n0 `Text.append` Text.pack ('@' : show ty)
+  in Var n0' i0 : fixSegments ss ts
+fixSegments (Dir d : ss) ts = Dir d : fixSegments ss ts
 fixSegments [] [] = []
 fixSegments _ _ = error "BUG: fixSegments called incorrectly"
 
 -- | Convert a path to its corresponding segments
-toPathSegments :: Monad m => Text -> m [PathSegment]
-toPathSegments path = do
-  -- TODO: decodePathSegments assumes valid path. We should make sure that
-  -- the path is to spec <https://tools.ietf.org/html/rfc3986#section-3.3>
-  let segments = decodePathSegments (Text.encodeUtf8 path)
-  return . snd $ foldr (\seg (idx, ps) ->
-    (idx - 1, toPathSegment seg idx : ps)) (length segments - 1,[]) segments
-  where toPathSegment seg idx = if ":" `Text.isPrefixOf` seg
-                                  then Var seg idx else Dir seg
+toPathSegments :: Text -> [PathSegment]
+toPathSegments path = snd $ foldr fn (length segments - 1, []) segments where
+    -- TODO: decodePathSegments assumes valid path. We should make sure that
+    -- the path is to spec <https://tools.ietf.org/html/rfc3986#section-3.3>
+    segments = decodePathSegments $ Text.encodeUtf8 path
+    fn seg (idx, ps) = (idx - 1, toPathSegment seg idx : ps)
+                          -- Required variable
+    toPathSegment seg idx | ":" `Text.isPrefixOf`  seg = Var seg idx
+                          | otherwise                  = Dir seg
 
 -- | A path segment is a simple directory or a variable. Variables are always
 -- prefixed by @:@ and considered the same (equal).
@@ -227,7 +228,7 @@ instance Show PathSegment where
   show (Var s _) = Text.unpack s -- ++ "@" ++ show i
 
 instance {-# INCOHERENT #-} Show [PathSegment] where
-  show ps = "/" ++ (intercalate "/" $ map show ps) ++ "/"
+  show ps = "/" ++ intercalate "/" (map show ps) ++ "/"
 
 instance Eq PathSegment where
   (Dir x) == (Dir y) = x == y
@@ -235,9 +236,9 @@ instance Eq PathSegment where
   _ == _ = False
 
 instance Ord PathSegment where
-  compare (Dir x) (Dir y) = compare x y
-  compare (Dir _) (Var _ _) = LT
-  compare (Var _ _) (Dir _) = GT
+  compare (Dir x) (Dir y)     = compare x y
+  compare (Dir _) (Var _ _)   = LT
+  compare (Var _ _) (Dir _)   = GT
   compare (Var _ _) (Var _ _) = EQ
 
 --
@@ -259,7 +260,7 @@ host pref = do
   when (isJust $ cfgHostPref cfg) $ cfgFail "host already set"
   setModeConfig $ cfg { cfgHostPref = Just pref }
 
--- | Set the app host preference.
+-- | Set the app's initial state.
 appState :: s -> FrankieConfigMode s m ()
 appState s = do
   cfg <- getModeConfig
@@ -271,13 +272,23 @@ appState s = do
 logger :: Monad m => LogLevel -> Logger m -> FrankieConfigMode s m ()
 logger level (Logger lgr0) = do
   cfg <- getModeConfig
-  -- create logger that only logs things as sever as level
-  let lgr1 l s = when (l <= level) $ lgr0 l s 
+  -- create logger that only logs things as severe as level
+  let lgr1 l s = when (l <= level) $ lgr0 l s
       newLogger = case cfgLogger cfg of
                     Just (Logger lgrC) -> \l s -> lgrC l s >> lgr1 l s
-                    Nothing -> lgr1
+                    Nothing            -> lgr1
   setModeConfig $ cfg { cfgLogger = Just (Logger newLogger)}
 
+-- TODO: can we make sure that @path@ exists before setting the dir?
+static :: Monad m => StaticHandler m -> Text -> Text -> FrankieConfigMode s m ()
+static handler vprefix path = do
+  cfg <- getModeConfig
+  case cfgStaticDir cfg of
+    Just _  -> cfgFail "static path already set"
+    Nothing -> setModeConfig $ cfg { cfgStaticDir = Just (handler, prep vprefix, path) } where
+      prep text = Text.split (== '/') (pref . suff $ text)
+      pref text = fromMaybe text $ Text.stripPrefix "/" text
+      suff text = fromMaybe text $ Text.stripSuffix "/" text
 
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
@@ -297,8 +308,7 @@ setModeConfig :: ModeConfig s m -> FrankieConfigMode s m ()
 setModeConfig modeCfg = do
   mode0 <- ask
   cfg <- State.get
-  let modeMap = cfgModes cfg
-  State.put $ cfg { cfgModes = Map.insert mode0 modeCfg modeMap }
+  State.put $ cfg { cfgModes = Map.insert mode0 modeCfg $ cfgModes cfg }
 
 -- | Helper function for creating a new config mode.
 newModeConfig :: FrankieConfigMode s m ()
@@ -310,11 +320,6 @@ newModeConfig = do
   case Map.lookup mode0 modeMap of
     Just _       -> cfgFail "mode already defined"
     _            -> State.put $ cfg { cfgModes = Map.insert mode0 nullModeCfg modeMap }
-
-
---
---
---
 
 -- | Type used to encode a Frankie server configuration
 newtype FrankieConfig s m a = FrankieConfig {
@@ -374,7 +379,7 @@ runFrankieServer :: WebMonad m
                  -> IO ()
 runFrankieServer mode0 frankieAct = do
   cfg <- runFrankieConfig frankieAct
-  case (Map.lookup mode0 $ cfgModes cfg) of
+  case Map.lookup mode0 $ cfgModes cfg of
     Nothing -> throwIO $ InvalidConfig "invalid mode "
     Just modeCfg -> do
       when (isNothing $ cfgPort modeCfg) $ throwIO $ InvalidConfig "missing port"
@@ -387,27 +392,31 @@ runFrankieServer mode0 frankieAct = do
           lgr = case cfgLogger modeCfg of
                   Just l -> l
                   _      -> Logger $ \_ _ -> return ()
+          (hdlr, _, _) = case cfgStaticDir modeCfg of
+                   Just h -> h
+                   _      -> (StaticHandler $ \_ _ -> return Nothing, [""], "")
 
-      server cPort cHost (toApp (mainFrankieController cfg) cState lgr)
+      server cPort cHost (toApp (mainFrankieController cfg modeCfg) cState lgr hdlr)
 
 -- | The main controller that dispatches requests to corresponding controllers.
-mainFrankieController :: WebMonad m => ServerConfig s m -> Controller s m ()
-mainFrankieController cfg = do
+mainFrankieController :: WebMonad m => ServerConfig s m -> ModeConfig s m -> Controller s m ()
+mainFrankieController cfg modeCfg = do
   req <- request
   let method   = reqMethod req
       pathInfo = reqPathInfo req
   let cs = Map.toList $
             Map.filterWithKey (\(m, ps) _ -> m == method && matchPath ps pathInfo) $
             cfgDispatchMap cfg
-  -- create controller action to execute
-  controller <- return $ case cs of
-    [(_, controller)] -> controller
-    -- didn't match anything in the dispatch table, fallback?
-    _ | (isJust $ cfgDispatchFallback cfg) -> fromJust $ cfgDispatchFallback cfg
-    -- nope, just respond with 404
-    _ -> respond notFound
-  -- execute the controller action
-  er <- tryController controller
+  -- create and execute the controller action
+  er <- tryController $ case cs of
+    [(_, ctrl)] -> ctrl
+    _ -> do
+      file <- case cfgStaticDir modeCfg of
+        Just (StaticHandler handler, vprefix, path) -> lift $ handler (vprefix, path) pathInfo
+        Nothing -> return Nothing
+      if isJust file
+        then respond $ okHtml $ fromJust file
+        else fromMaybe (respond notFound) $ cfgDispatchFallback cfg
   case er of
     Right r  -> return r
     -- controller raised exception
@@ -423,7 +432,7 @@ mainFrankieController cfg = do
             -- handler throw exception
             _       -> respond $ serverError "Something went wrong"
         -- no user-defined handler
-        _            -> respond $ serverError "Something went wrong"
+        _ -> respond $ serverError "Something went wrong"
 
 -- | Match a path segment with the path request info. We only need
 -- to make sure that the number of directories are the same and
@@ -434,18 +443,17 @@ matchPath (Var _ _:ps) (_:ts) = matchPath ps ts
 matchPath []           []     = True
 matchPath _            _      = False
 
-
 -- | A server configuration containts the port and host to run the server on.
 -- It also contains the dispatch table.
 -- TODO: add support for error handlers, loggers, dev vs. prod, etc.
 data ServerConfig s m = ServerConfig {
-  cfgModes       :: Map Mode (ModeConfig s m),
+  cfgModes            :: Map Mode (ModeConfig s m),
   -- ^ Configuration modes
-  cfgDispatchMap :: Map (Method, [PathSegment]) (Controller s m ()),
+  cfgDispatchMap      :: Map (Method, [PathSegment]) (Controller s m ()),
   -- ^ Dispatch table
   cfgDispatchFallback :: Maybe (Controller s m ()),
   -- ^ Dispatch fallback handler
-  cfgOnErrorHandler  :: Maybe (SomeException -> Controller s m ())
+  cfgOnErrorHandler   :: Maybe (SomeException -> Controller s m ())
   -- ^ Exception handler
 }
 
@@ -457,7 +465,7 @@ instance Show s  => Show (ServerConfig s m) where
     ++ "}"
 
 -- | Configuration errors
-data InvalidConfigException = InvalidConfig String
+newtype InvalidConfigException = InvalidConfig String
   deriving (Show, Typeable)
 instance Exception InvalidConfigException
 
@@ -479,16 +487,16 @@ type Mode = String
 
 -- | Mode configuration. For example, production or development.
 data ModeConfig s m = ModeConfig {
-  cfgPort        :: Maybe Port,
-  cfgHostPref    :: Maybe HostPreference,
-  cfgAppState    :: Maybe s,
-  cfgLogger      :: Maybe (Logger m)
-  }
+  cfgPort      :: Maybe Port,
+  cfgHostPref  :: Maybe HostPreference,
+  cfgAppState  :: Maybe s,
+  cfgLogger    :: Maybe (Logger m),
+  cfgStaticDir :: Maybe (StaticHandler m, [Text], Text)
+}
 
 instance Show (ModeConfig s m) where
   show cfg = (show . cfgHostPref $ cfg) ++ ":" ++
              (show . cfgHostPref $ cfg)
-
 
 -- | Empty mode configuration.
 nullModeCfg :: ModeConfig s m
@@ -496,5 +504,6 @@ nullModeCfg =  ModeConfig {
   cfgPort        = Nothing,
   cfgHostPref    = Nothing,
   cfgAppState    = Nothing,
-  cfgLogger      = Nothing
+  cfgLogger      = Nothing,
+  cfgStaticDir   = Nothing
 }
