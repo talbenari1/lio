@@ -90,12 +90,12 @@ instance Functor ControllerStatus where
 -- Within the Controller monad, the remainder of the computation can be
 -- short-circuited by 'respond'ing with a 'Response'.
 newtype Controller s m a = Controller {
-  runController :: s -> Logger m -> StaticHandler m -> Request m -> m (ControllerStatus a, s)
+  runController :: s -> Logger m -> StaticHandler m -> ViewHandler m -> Request m -> m (ControllerStatus a, s)
 } deriving (Typeable)
 
 instance Functor m => Functor (Controller s m) where
-  fmap f (Controller act) = Controller $ \s0 logger handler req ->
-    go `fmap` act s0 logger handler req
+  fmap f (Controller act) = Controller $ \s0 logger shandler vhandler req ->
+    go `fmap` act s0 logger shandler vhandler req
     where go (cs, st) = (f `fmap` cs, st)
 
 instance (Monad m, Functor m) => Applicative (Controller s m) where
@@ -103,33 +103,33 @@ instance (Monad m, Functor m) => Applicative (Controller s m) where
   (<*>) = ap
 
 instance Monad m => Monad (Controller s m) where
-  return a = Controller $ \st _ _ _ -> return (Working a, st)
-  (Controller act0) >>= fn = Controller $ \st0 logger handler req -> do
-    (cs, st1) <- act0 st0 logger handler req
+  return a = Controller $ \st _ _ _ _ -> return (Working a, st)
+  (Controller act0) >>= fn = Controller $ \st0 logger shandler vhandler req -> do
+    (cs, st1) <- act0 st0 logger shandler vhandler req
     case cs of
       Done resp -> return (Done resp, st1)
       Working v -> do
         let (Controller act1) = fn v
-        act1 st1 logger handler req
+        act1 st1 logger shandler vhandler req
 
 instance Monad m => MonadState s (Controller s m) where
-  get   = Controller $ \s _ _ _ -> return (Working s, s)
-  put s = Controller $ \_ _ _ _ -> return (Working (), s)
+  get   = Controller $ \s _ _ _ _ -> return (Working s, s)
+  put s = Controller $ \_ _ _ _ _ -> return (Working (), s)
 
 instance Monad m => MonadReader (Request m) (Controller s m) where
-  ask = Controller $ \st _ _ req -> return (Working req, st)
-  local f (Controller act) = Controller $ \st logger handler req -> act st logger handler (f req)
+  ask = Controller $ \st _ _ _ req -> return (Working req, st)
+  local f (Controller act) = Controller $ \st logger shandler vhandler req -> act st logger shandler vhandler (f req)
 
 instance MonadTrans (Controller s) where
-  lift act = Controller $ \st _ _ _ -> act >>= \r -> return (Working r, st)
+  lift act = Controller $ \st _ _ _ _ -> act >>= \r -> return (Working r, st)
 
 -- | Try executing the controller action, returning the result or raised
 -- exception. Note that exceptions restore the state.
 tryController :: WebMonad m
               => Controller s m a
               -> Controller s m (Either SomeException a)
-tryController ctrl = Controller $ \s0 logger handler req -> do
-  eres <- tryWeb $ runController ctrl s0 logger handler req
+tryController ctrl = Controller $ \s0 logger shandler vhandler req -> do
+  eres <- tryWeb $ runController ctrl s0 logger shandler vhandler req
   case eres of
    Left err -> return (Working (Left err), s0)
    Right (stat, s1) ->
@@ -153,7 +153,7 @@ request = ask
 --
 -- @respond r >>= f === respond r@
 respond :: Monad m => Response -> Controller s m a
-respond resp = Controller $ \s _ _ _ -> return (Done resp, s)
+respond resp = Controller $ \s _ _ _ _ -> return (Done resp, s)
 
 -- | Extract the application-specific state.
 getAppState :: Monad m => Controller s m s
@@ -173,9 +173,9 @@ fromApp app = do
 
 -- | Convert the controller into an 'Application'. This can be used to
 -- directly run the controller with 'server', for example.
-toApp :: WebMonad m => Controller s m () -> s -> Logger m -> StaticHandler m -> Application m
-toApp ctrl s0 logger handler req = do
-  (cs, _) <- runController ctrl s0 logger handler req
+toApp :: WebMonad m => Controller s m () -> s -> Logger m -> StaticHandler m -> ViewHandler m -> Application m
+toApp ctrl s0 logger shandler vhandler req = do
+  (cs, _) <- runController ctrl s0 logger shandler vhandler req
   return $ case cs of
             Done resp -> resp
             _         -> notFound
@@ -254,7 +254,7 @@ redirectBackOr def = do
 
 -- | Log text using app-specific logger.
 log :: WebMonad m => LogLevel -> String -> Controller s m ()
-log level str = Controller $ \s0 (Logger logger) _ _ -> do
+log level str = Controller $ \s0 (Logger logger) _ _ _ -> do
    logger level str
    return (Working (), s0)
 
@@ -275,3 +275,11 @@ data LogLevel = EMERGENCY
               deriving (Show, Eq, Ord)
 
 newtype StaticHandler m = StaticHandler (([Text], Text) -> [Text] -> m (Maybe L8.ByteString))
+
+render :: WebMonad m => Text -> Controller s m ()
+render filename = Controller $ \s0 _ _ (ViewHandler handler path) _ -> do
+    maybeFile <- handler path filename
+    case maybeFile of
+        Just file -> respond $ okHtml file
+        Nothing -> respond notFound
+data ViewHandler m = ViewHandler ( Text -> Text -> m (Maybe L8.ByteString)) Text

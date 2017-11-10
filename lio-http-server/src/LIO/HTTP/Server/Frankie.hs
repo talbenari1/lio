@@ -290,6 +290,13 @@ static handler vprefix path = do
       pref text = fromMaybe text $ Text.stripPrefix "/" text
       suff text = fromMaybe text $ Text.stripSuffix "/" text
 
+views :: Monad m => (Text -> Text -> m (Maybe L8.ByteString)) -> Text -> FrankieConfigMode s m ()
+views handler path = do
+    cfg <- getModeConfig
+    case cfgStaticDir cfg of
+        Just _ -> cfgFail "View engine already set"
+        Nothing -> setModeConfig $ cfg { cfgViewsDir = Just (ViewHandler handler path) }
+
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
 getModeConfig :: FrankieConfigMode s m (ModeConfig s m)
@@ -492,6 +499,7 @@ data ModeConfig s m = ModeConfig {
   cfgAppState  :: Maybe s,
   cfgLogger    :: Maybe (Logger m),
   cfgStaticDir :: Maybe (StaticHandler m, [Text], Text)
+  cfgViewsDir  :: Maybe (ViewHandler m)
 }
 
 instance Show (ModeConfig s m) where
@@ -505,5 +513,6 @@ nullModeCfg =  ModeConfig {
   cfgHostPref    = Nothing,
   cfgAppState    = Nothing,
   cfgLogger      = Nothing,
-  cfgStaticDir   = Nothing
+  cfgStaticDir   = Nothing,
+  cfgViewsDir    = Nothing
 }
