@@ -279,7 +279,7 @@ logger level (Logger lgr0) = do
                     Nothing            -> lgr1
   setModeConfig $ cfg { cfgLogger = Just (Logger newLogger)}
 
--- TODO: can we make sure that @path@ exists before setting the dir?
+-- TODO: can we make sure that @path@ exists before setting the dir? (This would require IO)
 static :: Monad m => StaticHandler m -> Text -> Text -> FrankieConfigMode s m ()
 static handler vprefix path = do
   cfg <- getModeConfig
@@ -290,12 +290,12 @@ static handler vprefix path = do
       pref text = fromMaybe text $ Text.stripPrefix "/" text
       suff text = fromMaybe text $ Text.stripSuffix "/" text
 
-views :: Monad m => (Text -> Text -> m (Maybe L8.ByteString)) -> Text -> FrankieConfigMode s m ()
+views :: Monad m => ViewHandler m -> Text -> FrankieConfigMode s m ()
 views handler path = do
     cfg <- getModeConfig
-    case cfgStaticDir cfg of
+    case cfgViewsDir cfg of
         Just _ -> cfgFail "View engine already set"
-        Nothing -> setModeConfig $ cfg { cfgViewsDir = Just (ViewHandler handler path) }
+        Nothing -> setModeConfig $ cfg { cfgViewsDir = Just (handler, path) }
 
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
@@ -498,8 +498,8 @@ data ModeConfig s m = ModeConfig {
   cfgHostPref  :: Maybe HostPreference,
   cfgAppState  :: Maybe s,
   cfgLogger    :: Maybe (Logger m),
-  cfgStaticDir :: Maybe (StaticHandler m, [Text], Text)
-  cfgViewsDir  :: Maybe (ViewHandler m)
+  cfgStaticDir :: Maybe (StaticHandler m, [Text], Text),
+  cfgViewsDir  :: Maybe (ViewHandler m, Text)
 }
 
 instance Show (ModeConfig s m) where

@@ -9,11 +9,10 @@ import qualified Data.Text                  as Text
 import           LIO.DCLabel                (DC)
 import           LIO.HTTP.Server.Frankie    (StaticHandler (..))
 import           LIO.TCB                    (ioTCB)
-import           Prelude                    hiding (log)
 import           System.Directory           (canonicalizePath)
 import           System.FilePath            ((</>))
 
-fileHandler :: Text -> Text -> DC (Maybe L8.ByteString)
+fileHandler :: Text -> ViewHandler DC
 fileHandler path filename = do
     p <- ioTCB . canonicalizePath $ Text.unpack path
     let fullPath = p </> (Text.unpack . Text.intercalate "/") filename
